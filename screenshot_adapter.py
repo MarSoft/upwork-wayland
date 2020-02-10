@@ -9,6 +9,7 @@
 # - python 3.5+
 # - dbus-next python package (pip install dbus-next)
 # - grim (https://github.com/emersion/grim)
+# - swayidle (optional, for activity time tracking)
 
 import asyncio
 import datetime as dt
@@ -49,12 +50,16 @@ class IdleTime(ServiceInterface):
         self.last_active = dt.datetime.utcnow()
 
     async def start(self):
-        self.monitor = await asyncio.create_subprocess_exec(
-            'swayidle',
-            '-w', 'timeout', '1', 'echo timeout', 'resume', 'echo resume',
-            stdout=subprocess.PIPE,
-        )
-        self.worker = asyncio.create_task(self.run())
+        try:
+            self.monitor = await asyncio.create_subprocess_exec(
+                'swayidle',
+                '-w', 'timeout', '1', 'echo timeout', 'resume', 'echo resume',
+                stdout=subprocess.PIPE,
+            )
+            self.worker = asyncio.create_task(self.run())
+        except FileNotFoundError:
+            print('swayidle not available')
+            self.worker = None
 
     async def run(self):
         async for line in self.monitor.stdout:
@@ -77,9 +82,17 @@ class IdleTime(ServiceInterface):
 async def main():
     bus = MessageBus() #bus_type=BusType.SYSTEM)
     await bus.connect()
+
+    workers = [
+        # empty future to make sure we will wait forever
+        asyncio.get_event_loop().create_future(),
+    ]
+
     bus.export('/org/gnome/Shell/Screenshot', ScreenshotInterface())
     idle = IdleTime()
     await idle.start()
+    if idle.worker:
+        workers.append(idle.worker)
     bus.export('/org/gnome/Mutter/IdleMonitor/Core', idle)
     # Now we are ready to handle messages!
     await bus.request_name('org.gnome.Shell.Screenshot')
@@ -89,7 +102,7 @@ async def main():
 
     # run forever (FIXME is it a good way?)
     #await asyncio.get_event_loop().create_future()
-    await idle.worker
+    await asyncio.gather(*workers)
 
 
 if __name__ == '__main__':
