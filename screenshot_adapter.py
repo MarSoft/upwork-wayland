@@ -76,7 +76,8 @@ class IdleTime(ServiceInterface):
         # What unit do we want?
         delta = dt.datetime.utcnow() - self.last_active
         print('Asked idletime. It is', delta)
-        return round(delta.total_seconds())
+        # return milliseconds
+        return round(delta.total_seconds() * 1000)
 
 
 async def main():
