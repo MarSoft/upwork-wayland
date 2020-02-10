@@ -13,7 +13,6 @@
 
 import asyncio
 import datetime as dt
-import subprocess
 
 from dbus_next.aio import MessageBus
 from dbus_next.service import ServiceInterface, method, dbus_property, signal
@@ -24,24 +23,36 @@ class ScreenshotInterface(ServiceInterface):
     def __init__(self):
         super().__init__('org.gnome.Shell.Screenshot')
 
-    @method()
-    def Screenshot(self, include_cursor: 'b', flash: 'b', filename: 's') -> 'bs':
-        print('Got Screenshot call', include_cursor, flash, filename)
-        subprocess.run(['grim', *(['-c'] if include_cursor else []), filename])
-        return [True, filename]
+    async def call_grim(self, *args):
+        args = [a for a in args if a is not None]
+        proc = await asyncio.create_subprocess_exec('grim', *args)
+        code = await proc.wait()
+        return code == 0
 
     @method()
-    def ScreenshotWindow(self, include_frame: 'b', include_cursor: 'b', flash: 'b', filename: 's') -> 'bs':
+    async def Screenshot(self, include_cursor: 'b', flash: 'b', filename: 's') -> 'bs':
+        print('Got Screenshot call', include_cursor, flash, filename)
+        return [
+            await self.call_grim('-c' if include_cursor else None),
+            filename,
+        ]
+
+    @method()
+    async def ScreenshotWindow(self, include_frame: 'b', include_cursor: 'b', flash: 'b', filename: 's') -> 'bs':
         print('Got Window call', include_frame, include_cursor, flash, filename)
         # TODO capture current window somehow
-        subprocess.run(['grim', *(['-c'] if include_cursor else []), filename])
-        return [True, filename]
+        return [
+            await self.call_grim('-c' if include_cursor else None),
+            filename,
+        ]
 
     @method()
-    def ScreenshotArea(self, x: 'i', y: 'y', width: 'i', height: 'i', flash: 'b', filename: 's') -> 'bs':
+    async def ScreenshotArea(self, x: 'i', y: 'y', width: 'i', height: 'i', flash: 'b', filename: 's') -> 'bs':
         print('Got Area call', (x, y, width, height), flash, filename)
-        subprocess.run(['grim', '-g', f'{x},{y} {width}x{height}', filename])
-        return [True, filename]
+        return [
+            await self.call_grim('-g', f'{x},{y} {width}x{height}'),
+            filename,
+        ]
 
 
 class IdleTime(ServiceInterface):
@@ -50,11 +61,12 @@ class IdleTime(ServiceInterface):
         self.last_active = dt.datetime.utcnow()
 
     async def start(self):
+        # TODO: eliminate swayidle, work directly with logind?
         try:
             self.monitor = await asyncio.create_subprocess_exec(
                 'swayidle',
                 '-w', 'timeout', '1', 'echo timeout', 'resume', 'echo resume',
-                stdout=subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
             )
             self.worker = asyncio.create_task(self.run())
         except FileNotFoundError:
