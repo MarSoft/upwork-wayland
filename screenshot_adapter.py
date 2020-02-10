@@ -97,7 +97,8 @@ async def main():
     bus.export('/org/gnome/Mutter/IdleMonitor/Core', idle)
     # Now we are ready to handle messages!
     await bus.request_name('org.gnome.Shell.Screenshot')
-    await bus.request_name('org.gnome.Mutter.IdleMonitor')
+    if idle.worker:
+        await bus.request_name('org.gnome.Mutter.IdleMonitor')
 
     print('Started!')
 
