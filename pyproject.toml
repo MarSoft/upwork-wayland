@@ -1,0 +1,18 @@
+[build-system]
+requires = ["flit_core >=2,<3"]
+build-backend = "flit_core.buildapi"
+
+[tool.flit.metadata]
+module = "gnome_wayland_screenshot"
+author = "Semyon Maryasin"
+author-email = "simeon@maryasin.name"
+home-page = "https://github.com/MarSoft/upwork-wayland"
+description-file = "README.md"
+
+requires = [
+  "dbus-next > 0.1.2",
+]
+requires-python = ">=3.5,<4"
+
+[tool.flit.scripts]
+gnome_wayland_screenshot = "gnome_wayland_screenshot:run"

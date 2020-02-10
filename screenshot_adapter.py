@@ -117,5 +117,9 @@ async def main():
     await asyncio.gather(*workers)
 
 
-if __name__ == '__main__':
+def run(self):
     asyncio.run(main())
+
+
+if __name__ == '__main__':
+    run()
