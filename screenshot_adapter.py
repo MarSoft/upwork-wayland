@@ -14,10 +14,15 @@
 import asyncio
 import datetime as dt
 import subprocess
+import sys
 
 from dbus_next.aio import MessageBus
 from dbus_next.service import ServiceInterface, method, dbus_property, signal
 from dbus_next import Variant, BusType, DBusError
+
+
+def debug(*msg):
+    print(*msg, file=sys.stderr)
 
 
 class ScreenshotInterface(ServiceInterface):
@@ -26,20 +31,20 @@ class ScreenshotInterface(ServiceInterface):
 
     @method()
     def Screenshot(self, include_cursor: 'b', flash: 'b', filename: 's') -> 'bs':
-        print('Got Screenshot call', include_cursor, flash, filename)
+        debug('Got Screenshot call', include_cursor, flash, filename)
         subprocess.run(['grim', *(['-c'] if include_cursor else []), filename])
         return [True, filename]
 
     @method()
     def ScreenshotWindow(self, include_frame: 'b', include_cursor: 'b', flash: 'b', filename: 's') -> 'bs':
-        print('Got Window call', include_frame, include_cursor, flash, filename)
+        debug('Got Window call', include_frame, include_cursor, flash, filename)
         # TODO capture current window somehow
         subprocess.run(['grim', *(['-c'] if include_cursor else []), filename])
         return [True, filename]
 
     @method()
     def ScreenshotArea(self, x: 'i', y: 'y', width: 'i', height: 'i', flash: 'b', filename: 's') -> 'bs':
-        print('Got Area call', (x, y, width, height), flash, filename)
+        debug('Got Area call', (x, y, width, height), flash, filename)
         subprocess.run(['grim', '-g', f'{x},{y} {width}x{height}', filename])
         return [True, filename]
 
@@ -58,7 +63,7 @@ class IdleTime(ServiceInterface):
             )
             self.worker = asyncio.create_task(self.run())
         except FileNotFoundError:
-            print('swayidle not available')
+            debug('swayidle not available')
             self.worker = None
 
     async def run(self):
@@ -69,13 +74,13 @@ class IdleTime(ServiceInterface):
             elif line == 'resume':
                 self.last_active = dt.datetime.utcnow()
             else:
-                print('Got unknown line', line)
+                debug('Got unknown line', line)
 
     @method()
     def GetIdletime(self) -> 't':
         # What unit do we want?
         delta = dt.datetime.utcnow() - self.last_active
-        print('Asked idletime. It is', delta)
+        debug('Asked idletime. It is', delta)
         # return milliseconds
         return round(delta.total_seconds() * 1000)
 
@@ -100,7 +105,7 @@ async def main():
     if idle.worker:
         await bus.request_name('org.gnome.Mutter.IdleMonitor')
 
-    print('Started!')
+    debug('Started!')
 
     # run forever (FIXME is it a good way?)
     #await asyncio.get_event_loop().create_future()
