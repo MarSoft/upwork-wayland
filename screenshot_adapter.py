@@ -96,12 +96,15 @@ class WaybarReporter:
     def __init__(self):
         self.last_shot = dt.datetime(2000, 1, 1)
         self.last_idle = dt.datetime(2000, 1, 1)
+        self.update = asyncio.Event()
 
     def screenshot_taken(self):
         self.last_shot = dt.datetime.utcnow()
+        self.update.set()
 
     def idle_taken(self):
         self.last_idle = dt.datetime.utcnow()
+        self.update.set()
 
     async def report_waybar(self):
         second = dt.timedelta(seconds=1)
@@ -135,9 +138,11 @@ class WaybarReporter:
                 if since_last_fmt.startswith('0:'):
                     since_last_fmt = since_last_fmt[2:]
             till_next_fmt = str(till_next // second * second)[-4:]
-            cls = 'done' if this_taken else 'active' if idle_active else 'passive'
+            cls = 'done' if this_taken else 'active' if idle_active else 'inactive'
 
-            text = f'@{self.last_shot:%H:%M}  {since_last_fmt}  {till_next_fmt}'
+            text = f'@{self.last_shot:%H:%M}  {since_last_fmt}'
+            if idle_active:
+                text += f'  {till_next_fmt}'
             #if not this_taken:
             #    text += f'  {round(percentage, 1)}%'
 
@@ -149,7 +154,12 @@ class WaybarReporter:
                 'tooltip': f'{cls}',
             }), flush=True)
 
-            await asyncio.sleep(1)
+            # Sleep for one second, but wake up early if update event happens
+            try:
+                await asyncio.wait_for(self.update.wait(), 1)
+                self.update.clear()  # reset event
+            except asyncio.TimeoutError:
+                pass
 
 
 async def main():
