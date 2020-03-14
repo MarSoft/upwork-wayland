@@ -22,7 +22,11 @@ from dbus_next import Variant, BusType, DBusError
 
 
 def debug(*msg):
-    print(*msg, file=sys.stderr)
+    try:
+        print(*msg, file=sys.stderr)
+    except OSError:
+        # can happen if stderr's terminal was closed
+        pass
 
 
 class ScreenshotInterface(ServiceInterface):
