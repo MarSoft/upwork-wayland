@@ -107,6 +107,18 @@ class WaybarReporter:
     def screenshot_taken(self):
         self.last_shot = dt.datetime.utcnow()
         self.update.set()
+        # XXX this is a temporary workaround,
+        # because Upwork's native notification steals focus in Sway
+        # and doesn't seem to show up in Sway's window tree.
+        subprocess.run([
+            'notify-send',
+            'Upwork', 'Screenshot taken!',
+            # TODO: use dbus instead, to add actions:
+            # /org/freedesktop/Notifications
+            # org.freedesktop.Notifications
+            # Notify
+            # 'notify-send', 0, '', Title, Body, dict(urgency=1, ...), -1
+        ])
 
     def idle_taken(self):
         self.last_idle = dt.datetime.utcnow()
