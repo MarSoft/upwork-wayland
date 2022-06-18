@@ -96,10 +96,12 @@ class IdleTime(ServiceInterface):
         return round(delta.total_seconds() * 1000)
 
 
+DUMMY = dt.datetime(2000, 1, 1)
+
 class WaybarReporter:
     def __init__(self):
-        self.last_shot = dt.datetime(2000, 1, 1)
-        self.last_idle = dt.datetime(2000, 1, 1)
+        self.last_shot = DUMMY
+        self.last_idle = DUMMY
         self.update = asyncio.Event()
 
     def screenshot_taken(self):
@@ -144,7 +146,13 @@ class WaybarReporter:
             till_next_fmt = str(till_next // second * second)[-4:]
             cls = 'done' if this_taken else 'active' if idle_active else 'inactive'
 
-            text = f'@{self.last_shot:%H:%M}  {since_last_fmt}'
+            if self.last_shot != DUMMY:
+                lastshot_local = self.last_shot.replace(
+                    tzinfo=dt.timezone.utc,
+                ).astimezone()
+                text = f'@{lastshot_local:%H:%M}  {since_last_fmt}'
+            else:
+                text = f'@__:__  {since_last_fmt}'
             if idle_active:
                 text += f'  {till_next_fmt}'
             #if not this_taken:
