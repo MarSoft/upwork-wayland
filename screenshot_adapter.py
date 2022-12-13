@@ -56,38 +56,10 @@ class ScreenshotInterface(ServiceInterface):
 class IdleTime(ServiceInterface):
     def __init__(self):
         super().__init__('org.gnome.Mutter.IdleMonitor')
-        self.last_active = dt.datetime.utcnow()
-
-    async def start(self):
-        try:
-            self.monitor = await asyncio.create_subprocess_exec(
-                'swayidle',
-                '-w', 'timeout', '1', 'echo timeout', 'resume', 'echo resume',
-                stdout=subprocess.PIPE,
-            )
-            self.worker = asyncio.create_task(self.run())
-        except FileNotFoundError:
-            debug('swayidle not available')
-            self.worker = None
+        self.worker = asyncio.create_task(self.run())
 
     async def run(self):
-        async for line in self.monitor.stdout:
-            line = line.decode().strip()
-            if line == 'timeout':
-                pass  # do nothing
-            elif line == 'resume':
-                self.last_active = dt.datetime.utcnow()
-            else:
-                debug('Got unknown line', line)
-
-    @method()
-    def GetIdletime(self) -> 't':
-        # What unit do we want?
-        delta = dt.datetime.utcnow() - self.last_active
-        debug('Asked idletime. It is', delta)
-        # return milliseconds
-        return round(delta.total_seconds() * 1000)
-
+        pass
 
 async def main():
     bus = MessageBus() #bus_type=BusType.SYSTEM)
@@ -100,7 +72,6 @@ async def main():
 
     bus.export('/org/gnome/Shell/Screenshot', ScreenshotInterface())
     idle = IdleTime()
-    await idle.start()
     if idle.worker:
         workers.append(idle.worker)
     bus.export('/org/gnome/Mutter/IdleMonitor/Core', idle)
