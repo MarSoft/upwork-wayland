@@ -50,46 +50,8 @@ extern GdkPixbuf* gdk_pixbuf_get_from_window(void *window, gint src_x, gint src_
         return NULL;
     }
     printf("Pixbuf success\n");
-    gboolean success = gdk_pixbuf_save(pixbuf, "/tmp/upwork-out.jpg", "jpeg", NULL, NULL);
-    printf("Pixbuf re-save: %d\n", success);
     return pixbuf;
 }
-
-/*
-extern int gdk_pixbuf_get_from_drawable() {
-    printf("gdk pixbuf get from drawable!\n");
-    return 0;
-}
-
-int (*real_gdk_pixbuf_get_height)(const GdkPixbuf*);
-extern int gdk_pixbuf_get_height(const GdkPixbuf* pixbuf) {
-    if(!real_gdk_pixbuf_get_height) real_gdk_pixbuf_get_height = dlsym(RTLD_NEXT, "gdk_pixbuf_get_height");
-    int res = real_gdk_pixbuf_get_height(pixbuf);
-    printf("gdk_pixbuf_get_height(%p) => %d\n", pixbuf, res);
-    return res;
-}
-
-int (*real_gdk_pixbuf_get_width)(const GdkPixbuf*);
-extern int gdk_pixbuf_get_width(const GdkPixbuf* pixbuf) {
-    if(!real_gdk_pixbuf_get_width) real_gdk_pixbuf_get_width = dlsym(RTLD_NEXT, "gdk_pixbuf_get_width");
-    int res = real_gdk_pixbuf_get_width(pixbuf);
-    printf("gdk_pixbuf_get_width(%p) => %d\n", pixbuf, res);
-    return res;
-}
-
-extern GdkPixbuf* gdk_pixbuf_new(GdkColorspace cs, gboolean has_alpha, int bps, int w, int h) {
-    printf("gdk_pixbuf_new %dx%d!\n", w, h);
-    return NULL;
-}
-
-GdkPixbuf* (*real_gdk_pixbuf_new_from_file)(const char*, GError**);
-extern GdkPixbuf* gdk_pixbuf_new_from_file(const char* filename, GError** err) {
-    if(!real_gdk_pixbuf_new_from_file) real_gdk_pixbuf_new_from_file = dlsym(RTLD_NEXT, "gdk_pixbuf_new_from_file");
-    GdkPixbuf* res = real_gdk_pixbuf_new_from_file(filename, err);
-    printf("gdk_pixbuf_new_from_file(%s, %p) => %p\n", filename, err, res);
-    return res;
-}
-*/
 
 int wanna_break_dimensions = 0;
 
@@ -122,16 +84,6 @@ extern gboolean gdk_pixbuf_save_to_callback(GdkPixbuf* pb, GdkPixbufSaveFunc fn,
     printf("gdk_pixbuf_save_to_callback(%p, %p, %p, %s, %p, ...) => %d\n", pb, fn, dat, typ, err, res);
     return res;
 }
-
-/*
-GdkPixbuf* (*real_gdk_pixbuf_scale_simple)(const GdkPixbuf*, int, int, GdkInterpType);
-extern GdkPixbuf* gdk_pixbuf_scale_simple(const GdkPixbuf* src, int w, int h, GdkInterpType interp) {
-    if(!real_gdk_pixbuf_scale_simple) real_gdk_pixbuf_scale_simple = dlsym(RTLD_NEXT, "gdk_pixbuf_scale_simple");
-    GdkPixbuf* res = real_gdk_pixbuf_scale_simple(src, w, h, interp);
-    printf("gdk_pixbuf_scale_simple(%p, %d, %d, %d) => %p\n", src, w, h, interp, res);
-    return res;
-}
-*/
 
 Status (*real_XGetWindowAttributes)();
 extern Status XGetWindowAttributes(Display *display, Window w, XWindowAttributes *attrs) {
