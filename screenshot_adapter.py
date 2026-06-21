@@ -192,11 +192,15 @@ class WaybarReporter:
             #    text += f'  {round(percentage, 1)}%'
 
             print(json.dumps({
+                # Generic stuff — for both waybar and noctalia
                 'text': text,
                 'class': cls,
                 'alt': cls,
                 'percentage': round(percentage),
                 'tooltip': f'{cls}',
+                # Noctalia-specific addons (harmless for waybar)
+                'icon': 'check' if this_taken else 'eye',
+                'color': 'secondary' if this_taken else 'primary' if idle_active else 'tertiary',
             }), flush=True)
 
             # Sleep for one second, but wake up early if update event happens
