@@ -16,6 +16,7 @@ import datetime as dt
 import json
 import os
 import random
+import signal
 from pathlib import Path
 import subprocess
 import sys
@@ -65,6 +66,8 @@ class IdleTime(ServiceInterface):
         self.last_active = dt.datetime.now(dt.UTC)
         self.is_active = True  # we'll get 'timeout' when user becomes idle
         self.on_shot = on_shot
+        self.monitor = None
+        self.worker = None
 
     async def start(self):
         try:
@@ -77,6 +80,14 @@ class IdleTime(ServiceInterface):
         except FileNotFoundError:
             debug('swayidle not available')
             self.worker = None
+
+    def stop(self):
+        """Terminate the swayidle child so it isn't orphaned when we exit."""
+        if self.monitor and self.monitor.returncode is None:
+            try:
+                self.monitor.terminate()
+            except ProcessLookupError:
+                pass
 
     async def run(self):
         async for line in self.monitor.stdout:
@@ -311,10 +322,25 @@ async def main():
 
     debug('Started!')
 
-    # run forever (FIXME is it a good way?)
-    #await asyncio.get_event_loop().create_future()
-    await asyncio.gather(*workers)
+    gathered = asyncio.gather(*workers)
+
+    # Make SIGTERM unwind the event loop (like SIGINT does) so the finally below
+    # runs and we kill swayidle instead of orphaning it. SIGINT already raises
+    # KeyboardInterrupt through asyncio.run; SIGKILL/crash can't be handled.
+    try:
+        asyncio.get_event_loop().add_signal_handler(
+            signal.SIGTERM, gathered.cancel)
+    except (NotImplementedError, RuntimeError):
+        pass
+
+    try:
+        await gathered
+    finally:
+        idle.stop()
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
