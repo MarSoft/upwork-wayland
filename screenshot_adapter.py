@@ -21,8 +21,7 @@ import subprocess
 import sys
 
 from dbus_next.aio import MessageBus
-from dbus_next.service import ServiceInterface, method, dbus_property, signal
-from dbus_next import Variant, BusType, DBusError
+from dbus_next.service import ServiceInterface, method
 
 
 def debug(*msg):
@@ -286,7 +285,7 @@ async def activity_heartbeat(idle):
 
 
 async def main():
-    bus = MessageBus() #bus_type=BusType.SYSTEM)
+    bus = MessageBus()  # session bus (Upwork uses the session bus, not system one)
     await bus.connect()
 
     workers = [
