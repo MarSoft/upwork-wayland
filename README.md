@@ -16,8 +16,26 @@ Dependencies
 - Python 3.5 or newer
 - `dbus-next` python package (`pip install dbus-next` should work)
 - [`grim` tool](https://github.com/emersion/grim) somewhere in `PATH`
+- [`swayidle`](https://github.com/swaywm/swayidle) in `PATH` — for idle/active detection
+- [`xdotool`](https://github.com/jordansissel/xdotool) in `PATH` — for the activity heartbeat (below)
 
-<!-- - Optional: [`swayidle`](https://github.com/swaywm/swayidle) in `PATH` - for accurate idle time calculation -->
+Activity heartbeat
+------------------
+
+Upwork (under XWayland) counts keyboard/mouse activity via XInput2 raw events,
+which only see input routed to XWayland windows. Input to **native Wayland**
+windows is invisible to it, so working in Wayland-native apps is counted as zero
+keystrokes. While `swayidle` reports the user as active, the adapter injects a
+low, randomized rate of no-op keypresses (the `F13` keysym — bound to nothing, so
+it types no text and triggers no shortcut) via `xdotool` (XTEST), keeping the
+counter alive. It mirrors **real presence only** — nothing is injected while you
+are idle.
+
+```sh
+UPWORK_ACTIVITY_HEARTBEAT=0   # disable the heartbeat
+UPWORK_HEARTBEAT_MIN=8        # min seconds between injections (default 8)
+UPWORK_HEARTBEAT_MAX=16       # max seconds between injections (default 16)
+```
 
 Moving notifications away from a top bar
 ---------------------------------------

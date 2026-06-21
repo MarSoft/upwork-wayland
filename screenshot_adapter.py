@@ -14,6 +14,8 @@
 import asyncio
 import datetime as dt
 import json
+import os
+import random
 from pathlib import Path
 import subprocess
 import sys
@@ -87,6 +89,10 @@ class IdleTime(ServiceInterface):
             elif line == 'resume':
                 self.is_active = True
                 self.last_active = dt.datetime.utcnow()
+                # Inject immediately on wake-up so Upwork registers the
+                # idle->active transition without waiting for the next heartbeat.
+                if heartbeat_enabled():
+                    asyncio.create_task(inject_activity())
             else:
                 debug('Got unknown line', line)
 
@@ -218,6 +224,57 @@ class WaybarReporter:
                 pass
 
 
+# Activity heartbeat: while the user is genuinely active (per swayidle), inject a
+# few no-op keypresses per minute so Upwork's keystroke counter stays alive.
+#
+# Why this is needed: Upwork (XWayland) counts keyboard/mouse activity via XInput2
+# raw events, which only see input routed to XWayland windows. Input to NATIVE
+# Wayland windows is invisible to it, so working in Wayland-native apps shows up as
+# 0 keystrokes. We inject F13 -- a keysym bound to nothing, so it types no text and
+# triggers no shortcut, but still counts as a raw keypress. xdotool uses XTEST.
+#
+# This deliberately mirrors REAL presence only (gated on swayidle 'active'); it does
+# NOT fabricate activity while you are away. Rate is intentionally low and randomized.
+# Set UPWORK_ACTIVITY_HEARTBEAT=0 to disable, or UPWORK_HEARTBEAT_MIN/MAX=<sec>.
+
+# No-op keysym to inject (bound to nothing -> types nothing, triggers nothing).
+HEARTBEAT_KEY = 'F13'
+
+async def inject_activity():
+    """Inject one no-op keypress (XTEST via xdotool). Returns False if xdotool
+    is missing so callers can stop trying."""
+    try:
+        p = await asyncio.create_subprocess_exec(
+            'xdotool', 'key', HEARTBEAT_KEY,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        await p.wait()
+        return True
+    except FileNotFoundError:
+        debug('xdotool not available; activity injection off')
+        return False
+
+def heartbeat_enabled():
+    return os.environ.get('UPWORK_ACTIVITY_HEARTBEAT', '1') not in ('0', '', 'false')
+
+async def activity_heartbeat(idle):
+    if not heartbeat_enabled():
+        debug('activity heartbeat disabled')
+        return
+    try:
+        lo = float(os.environ.get('UPWORK_HEARTBEAT_MIN', '8'))
+        hi = float(os.environ.get('UPWORK_HEARTBEAT_MAX', '16'))
+    except ValueError:
+        lo, hi = 8.0, 16.0
+    if hi < lo:
+        lo, hi = hi, lo
+    while True:
+        await asyncio.sleep(random.uniform(lo, hi))
+        if not idle.is_active:
+            continue
+        if not await inject_activity():
+            return
+
+
 async def main():
     bus = MessageBus() #bus_type=BusType.SYSTEM)
     await bus.connect()
@@ -236,6 +293,7 @@ async def main():
     await idle.start()
     if idle.worker:
         workers.append(idle.worker)
+        workers.append(activity_heartbeat(idle))
     bus.export('/org/gnome/Mutter/IdleMonitor/Core', idle)
     # Now we are ready to handle messages!
     await bus.request_name('org.gnome.Shell.Screenshot')
