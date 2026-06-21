@@ -6,6 +6,7 @@ with pkgs; mkShell {
     gdk-pixbuf.dev
     libx11.dev
     libxscrnsaver
+    libxcb.dev
     pkg-config
   ];
 }
