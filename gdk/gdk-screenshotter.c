@@ -11,8 +11,6 @@
 #include <gdk-pixbuf-2.0/gdk-pixbuf/gdk-pixbuf.h>
 
 #include <X11/Xlib.h>
-#include <X11/extensions/scrnsaver.h>
-#include <X11/extensions/XInput2.h>
 
 #include <xcb/xcb.h>
 #include <xcb/xcbext.h>
@@ -199,17 +197,6 @@ extern int XGetWindowProperty(Display *display, Window w, Atom property, long of
     return Success;
 }
 
-// This is seemingly unused. But GnomeIdleTime impl is not used too?..
-Bool (*real_XScreenSaverQueryExtension)();
-extern Bool XScreenSaverQueryExtension(Display *dpy, int *event_base_return, int *error_base_return) {
-    if(!real_XScreenSaverQueryExtension) {
-        real_XScreenSaverQueryExtension = dlsym(RTLD_NEXT, "XScreenSaverQueryExtension");
-    }
-    printf("XSSQE: %p %p=%d %p=%d\n", dpy, event_base_return, *event_base_return, error_base_return, *error_base_return);
-    Bool res = real_XScreenSaverQueryExtension(dpy, event_base_return, error_base_return);
-    printf("XSSQE: %p=%d %p=%d -> %d\n", event_base_return, *event_base_return, error_base_return, *error_base_return, res);
-    return res;
-}
 
 // Shared verbose-logging gate (UPWORK_NOTIF_DEBUG=1). Used by both the
 // input-stats instrumentation (ISLOG) and the notification tracing (XLOG).
@@ -219,89 +206,25 @@ static int shim_debug(void) {
     return v;
 }
 
-// --- INPUT-STATS INSTRUMENTATION (logging only) ---------------------------
-// The activity counter lives in uta_native.node, which uses XInput2 (libXi):
-// XIQueryDevice + XISelectEvents to monitor raw input, delivered as XGenericEvent
-// cookies read via XGetEventData. (Idle is separate: DBus IdleMonitor +
-// XScreenSaverQueryInfo.) Under XWayland XInput2 raw events only cover
-// XWayland-routed input, so global keys/clicks are missed. These hooks log what
-// the addon selects and which XI events actually arrive. Grep "INSTAT:".
-#define ISLOG(...) do { if (shim_debug()) { \
-    fprintf(stderr, "INSTAT: " __VA_ARGS__); fputc('\n', stderr); fflush(stderr); } } while(0)
-
-// XI2 event types (X11/extensions/XI2.h): RawKeyPress=13, RawKeyRelease=14,
-// RawButtonPress=15, RawButtonRelease=16, RawMotion=17; non-raw KeyPress=2 etc.
-static const char *xi_evtype_name(int t) {
-    switch (t) {
-    case XI_KeyPress: return "KeyPress"; case XI_KeyRelease: return "KeyRelease";
-    case XI_ButtonPress: return "ButtonPress"; case XI_ButtonRelease: return "ButtonRelease";
-    case XI_Motion: return "Motion";
-    case XI_RawKeyPress: return "RawKeyPress"; case XI_RawKeyRelease: return "RawKeyRelease";
-    case XI_RawButtonPress: return "RawButtonPress"; case XI_RawButtonRelease: return "RawButtonRelease";
-    case XI_RawMotion: return "RawMotion";
-    default: return "other";
-    }
-}
-
-// XISelectEvents(dpy, win, masks[], nmasks): each mask selects XI event types on
-// a device for a window. Log the window, device, and which event bits are set.
-int (*real_XISelectEvents)(Display*, Window, XIEventMask*, int);
-extern int XISelectEvents(Display *dpy, Window win, XIEventMask *masks, int nmasks) {
-    if (!real_XISelectEvents) real_XISelectEvents = dlsym(RTLD_NEXT, "XISelectEvents");
-    for (int i = 0; i < nmasks; i++) {
-        char b[256]; int o = 0;
-        for (int t = 0; t < masks[i].mask_len * 8; t++)
-            if (XIMaskIsSet(masks[i].mask, t))
-                o += snprintf(b+o, sizeof(b)-o, " %s(%d)", xi_evtype_name(t), t);
-        ISLOG("XISelectEvents win=0x%lX deviceid=%d mask:%s", win, masks[i].deviceid, b);
-    }
-    return real_XISelectEvents(dpy, win, masks, nmasks);
-}
-
-// XGetEventData fetches the cookie data for a GenericEvent; for XInput2 events
-// cookie->evtype is the XI type. This fires for each raw input event received.
-Bool (*real_XGetEventData)(Display*, XGenericEventCookie*);
-extern Bool XGetEventData(Display *dpy, XGenericEventCookie *cookie) {
-    if (!real_XGetEventData) real_XGetEventData = dlsym(RTLD_NEXT, "XGetEventData");
-    Bool r = real_XGetEventData(dpy, cookie);
-    if (cookie) ISLOG("XGetEventData ext=%d evtype=%d (%s)",
-                      cookie->extension, cookie->evtype, xi_evtype_name(cookie->evtype));
-    return r;
-}
-
-// XScreenSaverQueryInfo returns idle time (the OTHER idle path beside DBus).
-Status (*real_XScreenSaverQueryInfo)(Display*, Drawable, XScreenSaverInfo*);
-extern Status XScreenSaverQueryInfo(Display *dpy, Drawable d, XScreenSaverInfo *info) {
-    if (!real_XScreenSaverQueryInfo) real_XScreenSaverQueryInfo = dlsym(RTLD_NEXT, "XScreenSaverQueryInfo");
-    Status r = real_XScreenSaverQueryInfo(dpy, d, info);
-    if (r && info) ISLOG("XScreenSaverQueryInfo idle=%lums state=%d", info->idle, info->state);
-    return r;
-}
-
 // ---------------------------------------------------------------------------
-// NOTIFICATION REPOSITIONING via xcb_send_request().
+// Notification window tweaks via xcb_send_request().
 //
-// Upwork's notification windows are pinned to the top-right of the FULL screen,
-// covering a top bar/panel. This feature shifts them down by a fixed offset.
+// Window operations come through libxcb's raw xcb_send_request() (not Xlib), so
+// we intercept there: reposition notification windows (shift down by an offset)
+// and optionally adjust their _NET_WM_WINDOW_TYPE. Behavioral background lives in
+// NOTES.local.md (uncommitted), not here.
 //
-// Compile-time switch (see Makefile):
-//   -DUPWORK_MOVE_NOTIFICATIONS        enable the feature (default ON)
+// Options (see Makefile / env):
+//   -DUPWORK_MOVE_NOTIFICATIONS        enable repositioning (default ON)
 //   -DUPWORK_NOTIF_Y_OFFSET_DEFAULT=N  default downward shift in px (default 40)
-// Run-time tuning (no recompile):
-//   UPWORK_NOTIF_Y_OFFSET=N            override the offset
-//   UPWORK_NOTIF_DEBUG=1               verbose per-request tracing (timestamped)
+//   UPWORK_NOTIF_Y_OFFSET=N            override the offset at run time
+//   UPWORK_FIX_NOTIF_FOCUS=1           enable the focus fix (default off)
+//   UPWORK_NOTIF_DEBUG=1               verbose per-request tracing
 //
-// Upwork (Chromium/Ozone) does not create/position windows via Xlib -- it
-// encodes raw X11 protocol requests and submits them through the single libxcb
-// chokepoint xcb_send_request(). So that is where we intercept and rewrite the
-// notification windows' position.
-//
-// xcb_send_request(conn, flags, vector, req):
-//   - The caller's request bytes start at vector[0] (xcb reserves the two slots
-//     *before* the pointer, vector[-2]/[-1], for its own header). Valid entries
-//     are vector[0 .. req->count-1]. Byte 0 of the first entry is the X11 major
-//     opcode -- we switch on that (req->opcode is not reliable for hand-built
-//     requests, so we read the wire).
+// xcb_send_request(conn, flags, vector, req): the caller's request bytes start at
+// vector[0] (xcb reserves vector[-2]/[-1]); valid entries are vector[0..count-1].
+// Byte 0 of the first entry is the X11 major opcode (req->opcode is unreliable for
+// hand-built requests, so we read the wire).
 // ---------------------------------------------------------------------------
 #ifdef UPWORK_MOVE_NOTIFICATIONS
 
@@ -327,23 +250,19 @@ static void wr16(uint8_t *p, uint16_t v) { p[0]=v&0xff; p[1]=(v>>8)&0xff; }
 static void wr32(uint8_t *p, uint32_t v) { p[0]=v&0xff; p[1]=(v>>8)&0xff; p[2]=(v>>16)&0xff; p[3]=(v>>24)&0xff; }
 
 // --- Notification repositioning -------------------------------------------
-// Upwork's notification windows get pinned to the top-right of the FULL screen
-// (ConfigureWindow x≈screen_w-width, y≈10) -- covering the top bar. sway
-// publishes no _NET_WORKAREA, and Upwork ignores it for these windows anyway
-// (verified). So we shift their Y down by a fixed offset directly in the
-// ConfigureWindow wire request.
+// Notification windows pin themselves to the top-right of the FULL screen
+// (ConfigureWindow x≈screen_w-width, y≈10), covering a top bar. We shift their Y
+// down by a fixed offset in the ConfigureWindow wire request. _NET_WORKAREA is
+// not honored by the compositor/app for these, so we do it directly.
 //
-// Discriminate purely by geometry: a "notification" Configure is one that lands
-// in the top-right corner -- right edge near the screen's right edge AND a small
-// top Y. Width varies (360 regular, 444 screenshot) and isn't in ConfigureWindow,
-// so we learn each window's width at CreateWindow time to compute its right edge.
-// The main Upwork window is sway-managed and never pinned to the corner (it sits
-// mid-screen), so the corner test excludes it. (CreateWindow valuemask 0x23 is
-// BackPixmap|BackPixel|BitGravity, NOT override-redirect (0x200) -- that's set
-// later via ChangeWindowAttributes, so it's not a usable signal here.)
+// Discriminate purely by geometry: a "notification" Configure lands in the
+// top-right corner (right edge near the screen's right edge). Width isn't carried
+// in ConfigureWindow, so we cache each window's width at CreateWindow time to
+// compute its right edge. The main window is sway-managed and never corner-pinned,
+// so the corner test excludes it.
 #define WID_HASH 257
-#define NOTIF_RIGHT_SLACK 64        // allow Upwork's small right margin
-#define NOTIF_RECOMPUTE_MS 100      // window after create in which the bad recompute lands
+#define NOTIF_RIGHT_SLACK 64        // slack for the window's small right margin
+#define NOTIF_RECOMPUTE_MS 100      // post-create window for the one-shot Y correction
 
 // --- Focus-steal fix: EWMH atom resolution (see the ChangeProperty case) ---
 // X11 atom IDs are server-assigned, not constants, so we resolve them by name.

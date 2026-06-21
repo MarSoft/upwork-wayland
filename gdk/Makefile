@@ -1,4 +1,4 @@
-PKGS = gdk-pixbuf-2.0 x11 xscrnsaver xcb xi
+PKGS = gdk-pixbuf-2.0 x11 xcb
 CFLAGS = $(shell pkg-config $(PKGS) --cflags)
 LDFLAGS = $(shell pkg-config $(PKGS) --libs)
 
