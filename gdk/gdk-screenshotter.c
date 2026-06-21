@@ -324,6 +324,7 @@ static uint16_t rd16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8)); 
 static int16_t  rds16(const uint8_t *p) { return (int16_t)rd16(p); }
 static uint32_t rd32(const uint8_t *p) { return (uint32_t)(p[0] | (p[1]<<8) | (p[2]<<16) | ((uint32_t)p[3]<<24)); }
 static void wr16(uint8_t *p, uint16_t v) { p[0]=v&0xff; p[1]=(v>>8)&0xff; }
+static void wr32(uint8_t *p, uint32_t v) { p[0]=v&0xff; p[1]=(v>>8)&0xff; p[2]=(v>>16)&0xff; p[3]=(v>>24)&0xff; }
 
 // --- Notification repositioning -------------------------------------------
 // Upwork's notification windows get pinned to the top-right of the FULL screen
@@ -343,6 +344,39 @@ static void wr16(uint8_t *p, uint16_t v) { p[0]=v&0xff; p[1]=(v>>8)&0xff; }
 #define WID_HASH 257
 #define NOTIF_RIGHT_SLACK 64        // allow Upwork's small right margin
 #define NOTIF_RECOMPUTE_MS 100      // window after create in which the bad recompute lands
+
+// --- Focus-steal fix: EWMH atom resolution (see the ChangeProperty case) ---
+// X11 atom IDs are server-assigned, not constants, so we resolve them by name.
+// We do this via Xlib XInternAtom on our OWN short-lived Display connection --
+// NOT Upwork's xcb connection -- to avoid reentrancy/deadlock (we're called from
+// inside xcb_send_request; blocking for a reply on that same socket is unsafe).
+// Atoms are global to the X server, so IDs resolved on our Display are valid for
+// Upwork's connection too. Resolved once, lazily; 0 means "not resolved yet".
+static uint32_t atom_wm_type, atom_wm_type_normal, atom_wm_type_notification;
+static void resolve_focus_atoms(void) {
+    static int tried = 0;
+    if (tried) return;
+    tried = 1;
+    Display *d = XOpenDisplay(NULL);
+    if (!d) return;
+    atom_wm_type              = XInternAtom(d, "_NET_WM_WINDOW_TYPE", True);
+    atom_wm_type_normal       = XInternAtom(d, "_NET_WM_WINDOW_TYPE_NORMAL", True);
+    atom_wm_type_notification = XInternAtom(d, "_NET_WM_WINDOW_TYPE_NOTIFICATION", False);
+    XCloseDisplay(d);
+}
+
+// Opt-in: rewrite Upwork's notification windows' _NET_WM_WINDOW_TYPE from NORMAL
+// to NOTIFICATION so sway/wlroots doesn't grant them keyboard focus on map (they
+// are override-redirect; wlroots' override_redirect_wants_focus() returns true
+// for NORMAL but false for NOTIFICATION). Off by default.
+static int focus_fix_enabled(void) {
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("UPWORK_FIX_NOTIF_FOCUS");
+        v = e && *e && *e != '0';
+    }
+    return v;
+}
 
 // Per-window state. Besides the width (needed to compute the right edge), we
 // track when the window was created, the last *intended* (pre-offset) Y we
@@ -478,6 +512,31 @@ extern unsigned int xcb_send_request(xcb_connection_t *c, int flags,
                     int ny = iy + notif_y_offset();
                     wr16(vl + yoff, (uint16_t)(int16_t)ny);  // patch Y in place
                     XLOGA("notification 0x%X y=%d -> %d", wid, y, ny);
+                }
+            }
+            break;
+        case 18: // ChangeProperty: opcode, mode(1), len(2), window(4),
+                 // property-atom(4), type-atom(4)... The atom DATA lives in a
+                 // separate iovec (vector[1]), not contiguous with this header.
+            //
+            // FOCUS-STEAL FIX (opt-in: UPWORK_FIX_NOTIF_FOCUS): Upwork sets
+            // _NET_WM_WINDOW_TYPE = _NORMAL on its override-redirect notification
+            // windows. wlroots' override_redirect_wants_focus() returns true for
+            // NORMAL (not in its no-focus needle list), so sway grants the
+            // notification keyboard focus on map -> steals focus. Rewriting the
+            // type to _NOTIFICATION (which IS in that list) makes sway leave focus
+            // alone. We patch the atom in the caller's vector[1] buffer pre-send.
+            if (focus_fix_enabled() && p && len >= 12) {
+                resolve_focus_atoms();
+                if (atom_wm_type && rd32(p+8) == atom_wm_type &&
+                    req->count > 1 && vector[1].iov_len >= 4 && vector[1].iov_base) {
+                    uint8_t *d = (uint8_t*)vector[1].iov_base;
+                    if (atom_wm_type_normal && rd32(d) == atom_wm_type_normal &&
+                        atom_wm_type_notification) {
+                        wr32(d, atom_wm_type_notification);
+                        XLOG("rewrote _NET_WM_WINDOW_TYPE NORMAL->NOTIFICATION win=0x%X",
+                             rd32(p+4));
+                    }
                 }
             }
             break;

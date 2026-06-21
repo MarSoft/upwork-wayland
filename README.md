@@ -62,3 +62,29 @@ tracing, via environment variables (set them where `upwork.sh` runs):
 UPWORK_NOTIF_Y_OFFSET=64   # downward shift in pixels
 UPWORK_NOTIF_DEBUG=1       # log each intercepted request to stderr
 ```
+
+Stopping notifications from stealing keyboard focus
+--------------------------------------------------
+
+Upwork's notification windows are override-redirect X11 windows typed
+`_NET_WM_WINDOW_TYPE_NORMAL`. wlroots' `override_redirect_wants_focus()` returns
+true for `NORMAL` (it's not in the no-focus list of menu/tooltip/notification/…
+types), so sway grants the notification keyboard focus the moment it maps —
+stealing focus from whatever you were typing in (e.g. a terminal's cursor goes
+hollow and input stops). `focus_on_window_activation none` does NOT fix this; the
+grab happens in wlroots' map handler, not via `_NET_ACTIVE_WINDOW`.
+
+The shim works around it by intercepting the `ChangeProperty` that sets
+`_NET_WM_WINDOW_TYPE` and rewriting `NORMAL` → `NOTIFICATION` (which IS in the
+no-focus list), so sway leaves the window unfocused. Atom IDs are resolved at
+run time (via Xlib on a separate connection), and the rewrite only fires when the
+value is actually `NORMAL`, so it can't corrupt anything.
+
+Opt-in via env var (set in `upwork.sh`):
+
+```sh
+UPWORK_FIX_NOTIF_FOCUS=1   # rewrite NORMAL->NOTIFICATION; off by default
+```
+
+The proper long-term fix belongs in sway/wlroots (a way to treat selected
+override-redirect `NORMAL` windows as no-focus); this is a per-app workaround.

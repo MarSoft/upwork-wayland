@@ -21,6 +21,11 @@ export WAYLAND_DISPLAY_REAL=$WAYLAND_DISPLAY
 export WAYLAND_DISPLAY=
 # load our .so
 export LD_PRELOAD=$(dirname "$(realpath "$0")")/gdk-screenshotter.so
+# Stop Upwork's override-redirect notification windows from stealing keyboard
+# focus under sway: the shim rewrites their _NET_WM_WINDOW_TYPE NORMAL->NOTIFICATION
+# so wlroots' override_redirect_wants_focus() leaves them unfocused on map.
+export UPWORK_FIX_NOTIF_FOCUS=1
 # enable debug logging
 #LOG4JS_CONFIG=debug.json
+#UPWORK_NOTIF_DEBUG=1
 exec "$UPWORK" "$@"
