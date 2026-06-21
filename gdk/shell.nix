@@ -7,6 +7,7 @@ with pkgs; mkShell {
     libx11.dev
     libxscrnsaver
     libxcb.dev
+    libXi.dev
     pkg-config
   ];
 }

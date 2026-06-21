@@ -12,6 +12,7 @@
 
 #include <X11/Xlib.h>
 #include <X11/extensions/scrnsaver.h>
+#include <X11/extensions/XInput2.h>
 
 #include <xcb/xcb.h>
 #include <xcb/xcbext.h>
@@ -210,6 +211,73 @@ extern Bool XScreenSaverQueryExtension(Display *dpy, int *event_base_return, int
     return res;
 }
 
+// Shared verbose-logging gate (UPWORK_NOTIF_DEBUG=1). Used by both the
+// input-stats instrumentation (ISLOG) and the notification tracing (XLOG).
+static int shim_debug(void) {
+    static int v = -1;
+    if (v < 0) { const char *e = getenv("UPWORK_NOTIF_DEBUG"); v = e && *e && *e != '0'; }
+    return v;
+}
+
+// --- INPUT-STATS INSTRUMENTATION (logging only) ---------------------------
+// The activity counter lives in uta_native.node, which uses XInput2 (libXi):
+// XIQueryDevice + XISelectEvents to monitor raw input, delivered as XGenericEvent
+// cookies read via XGetEventData. (Idle is separate: DBus IdleMonitor +
+// XScreenSaverQueryInfo.) Under XWayland XInput2 raw events only cover
+// XWayland-routed input, so global keys/clicks are missed. These hooks log what
+// the addon selects and which XI events actually arrive. Grep "INSTAT:".
+#define ISLOG(...) do { if (shim_debug()) { \
+    fprintf(stderr, "INSTAT: " __VA_ARGS__); fputc('\n', stderr); fflush(stderr); } } while(0)
+
+// XI2 event types (X11/extensions/XI2.h): RawKeyPress=13, RawKeyRelease=14,
+// RawButtonPress=15, RawButtonRelease=16, RawMotion=17; non-raw KeyPress=2 etc.
+static const char *xi_evtype_name(int t) {
+    switch (t) {
+    case XI_KeyPress: return "KeyPress"; case XI_KeyRelease: return "KeyRelease";
+    case XI_ButtonPress: return "ButtonPress"; case XI_ButtonRelease: return "ButtonRelease";
+    case XI_Motion: return "Motion";
+    case XI_RawKeyPress: return "RawKeyPress"; case XI_RawKeyRelease: return "RawKeyRelease";
+    case XI_RawButtonPress: return "RawButtonPress"; case XI_RawButtonRelease: return "RawButtonRelease";
+    case XI_RawMotion: return "RawMotion";
+    default: return "other";
+    }
+}
+
+// XISelectEvents(dpy, win, masks[], nmasks): each mask selects XI event types on
+// a device for a window. Log the window, device, and which event bits are set.
+int (*real_XISelectEvents)(Display*, Window, XIEventMask*, int);
+extern int XISelectEvents(Display *dpy, Window win, XIEventMask *masks, int nmasks) {
+    if (!real_XISelectEvents) real_XISelectEvents = dlsym(RTLD_NEXT, "XISelectEvents");
+    for (int i = 0; i < nmasks; i++) {
+        char b[256]; int o = 0;
+        for (int t = 0; t < masks[i].mask_len * 8; t++)
+            if (XIMaskIsSet(masks[i].mask, t))
+                o += snprintf(b+o, sizeof(b)-o, " %s(%d)", xi_evtype_name(t), t);
+        ISLOG("XISelectEvents win=0x%lX deviceid=%d mask:%s", win, masks[i].deviceid, b);
+    }
+    return real_XISelectEvents(dpy, win, masks, nmasks);
+}
+
+// XGetEventData fetches the cookie data for a GenericEvent; for XInput2 events
+// cookie->evtype is the XI type. This fires for each raw input event received.
+Bool (*real_XGetEventData)(Display*, XGenericEventCookie*);
+extern Bool XGetEventData(Display *dpy, XGenericEventCookie *cookie) {
+    if (!real_XGetEventData) real_XGetEventData = dlsym(RTLD_NEXT, "XGetEventData");
+    Bool r = real_XGetEventData(dpy, cookie);
+    if (cookie) ISLOG("XGetEventData ext=%d evtype=%d (%s)",
+                      cookie->extension, cookie->evtype, xi_evtype_name(cookie->evtype));
+    return r;
+}
+
+// XScreenSaverQueryInfo returns idle time (the OTHER idle path beside DBus).
+Status (*real_XScreenSaverQueryInfo)(Display*, Drawable, XScreenSaverInfo*);
+extern Status XScreenSaverQueryInfo(Display *dpy, Drawable d, XScreenSaverInfo *info) {
+    if (!real_XScreenSaverQueryInfo) real_XScreenSaverQueryInfo = dlsym(RTLD_NEXT, "XScreenSaverQueryInfo");
+    Status r = real_XScreenSaverQueryInfo(dpy, d, info);
+    if (r && info) ISLOG("XScreenSaverQueryInfo idle=%lums state=%d", info->idle, info->state);
+    return r;
+}
+
 // ---------------------------------------------------------------------------
 // NOTIFICATION REPOSITIONING via xcb_send_request().
 //
@@ -246,14 +314,9 @@ static double log_ms(void) {
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
 }
-static int notif_debug(void) {
-    static int v = -1;
-    if (v < 0) { const char *e = getenv("UPWORK_NOTIF_DEBUG"); v = e && *e && *e != '0'; }
-    return v;
-}
-// XLOG: verbose, only when UPWORK_NOTIF_DEBUG is set.  XLOGA: always logged
-// (used for the rare reposition action -- one line per moved notification).
-#define XLOG(...)  do { if (notif_debug()) XLOGA(__VA_ARGS__); } while(0)
+// XLOG: verbose, only when UPWORK_NOTIF_DEBUG is set (shim_debug()).  XLOGA:
+// always logged (used for the rare reposition action -- one line per moved notif).
+#define XLOG(...)  do { if (shim_debug()) XLOGA(__VA_ARGS__); } while(0)
 #define XLOGA(...) do { fprintf(stderr, "XCBLOG %.1f: ", log_ms()); \
                        fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); fflush(stderr); } while(0)
 

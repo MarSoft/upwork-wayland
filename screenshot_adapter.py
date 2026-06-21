@@ -194,7 +194,7 @@ class WaybarReporter:
             else:
                 text = f'@__:__  {since_last_fmt}'
             if idle_active:
-                text += f'  {till_next_fmt}'
+                text += f'  x{till_next_fmt}'
             #if not this_taken:
             #    text += f'  {round(percentage, 1)}%'
 
