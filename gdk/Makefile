@@ -1,7 +1,7 @@
 PKGS = gdk-pixbuf-2.0 x11 xscrnsaver
 CFLAGS = $(shell pkg-config $(PKGS) --cflags)
 LDFLAGS = $(shell pkg-config $(PKGS) --libs)
-MYFLAGS = -fPIC -ldl -O2
+MYFLAGS = -fPIC -ldl -O2 -std=gnu17
 
 all: gdk-screenshotter.so
 
