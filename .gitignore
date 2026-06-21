@@ -1,0 +1,10 @@
+# build artifacts
+*.o
+*.so
+gdk/test
+
+# tooling caches / local env
+.ccls-cache/
+.direnv/
+env/
+__pycache__/
