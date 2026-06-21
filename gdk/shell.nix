@@ -4,8 +4,8 @@ with pkgs; mkShell {
     gcc
     glib.dev
     gdk-pixbuf.dev
-    xorg.libX11.dev
-    xorg.libXScrnSaver
+    libx11.dev
+    libxscrnsaver
     pkg-config
   ];
 }
