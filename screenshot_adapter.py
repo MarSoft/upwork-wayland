@@ -62,6 +62,7 @@ class IdleTime(ServiceInterface):
     def __init__(self, on_shot):
         super().__init__('org.gnome.Mutter.IdleMonitor')
         self.last_active = dt.datetime.utcnow()
+        self.is_active = True  # we'll get 'timeout' when user becomes idle
         self.on_shot = on_shot
 
     async def start(self):
@@ -80,8 +81,11 @@ class IdleTime(ServiceInterface):
         async for line in self.monitor.stdout:
             line = line.decode().strip()
             if line == 'timeout':
-                pass  # do nothing
+                self.is_active = False
+                # user was active 1 second ago
+                self.last_active = dt.datetime.utcnow() - dt.timedelta(seconds=1)
             elif line == 'resume':
+                self.is_active = True
                 self.last_active = dt.datetime.utcnow()
             else:
                 debug('Got unknown line', line)
@@ -89,7 +93,10 @@ class IdleTime(ServiceInterface):
     @method()
     def GetIdletime(self) -> 't':
         # What unit do we want?
-        delta = dt.datetime.utcnow() - self.last_active
+        if self.is_active:
+            delta = dt.timedelta(0)  # active right now
+        else:
+            delta = dt.datetime.utcnow() - self.last_active
         debug(dt.datetime.utcnow(), 'Asked idletime. It is', delta)
         if self.on_shot:
             self.on_shot()
