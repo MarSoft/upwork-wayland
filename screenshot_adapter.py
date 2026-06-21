@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Bridge script between Gnome Screenshot API and wlroots-based Wayland composer
 # Usage:
 # Run this script in the background.
