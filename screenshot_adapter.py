@@ -40,7 +40,7 @@ class ScreenshotInterface(ServiceInterface):
 
     @method()
     def Screenshot(self, include_cursor: 'b', flash: 'b', filename: 's') -> 'bs':
-        debug(dt.datetime.utcnow(), 'Got Screenshot call', include_cursor, flash, filename)
+        debug(dt.datetime.now(dt.UTC), 'Got Screenshot call', include_cursor, flash, filename)
         subprocess.run(['grim', *(['-c'] if include_cursor else []), filename])
         if self.on_shot:
             self.on_shot()
@@ -63,7 +63,7 @@ class ScreenshotInterface(ServiceInterface):
 class IdleTime(ServiceInterface):
     def __init__(self, on_shot):
         super().__init__('org.gnome.Mutter.IdleMonitor')
-        self.last_active = dt.datetime.utcnow()
+        self.last_active = dt.datetime.now(dt.UTC)
         self.is_active = True  # we'll get 'timeout' when user becomes idle
         self.on_shot = on_shot
 
@@ -85,10 +85,10 @@ class IdleTime(ServiceInterface):
             if line == 'timeout':
                 self.is_active = False
                 # user was active 1 second ago
-                self.last_active = dt.datetime.utcnow() - dt.timedelta(seconds=1)
+                self.last_active = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=1)
             elif line == 'resume':
                 self.is_active = True
-                self.last_active = dt.datetime.utcnow()
+                self.last_active = dt.datetime.now(dt.UTC)
                 # Inject immediately on wake-up so Upwork registers the
                 # idle->active transition without waiting for the next heartbeat.
                 if heartbeat_enabled():
@@ -102,15 +102,15 @@ class IdleTime(ServiceInterface):
         if self.is_active:
             delta = dt.timedelta(0)  # active right now
         else:
-            delta = dt.datetime.utcnow() - self.last_active
-        debug(dt.datetime.utcnow(), 'Asked idletime. It is', delta)
+            delta = dt.datetime.now(dt.UTC) - self.last_active
+        debug(dt.datetime.now(dt.UTC), 'Asked idletime. It is', delta)
         if self.on_shot:
             self.on_shot()
         # return milliseconds
         return round(delta.total_seconds() * 1000)
 
 
-DUMMY = dt.datetime(2000, 1, 1)
+DUMMY = dt.datetime(2000, 1, 1, tzinfo=dt.UTC)
 
 # Where the LD_PRELOAD shim (gdk/gdk-screenshotter.c, TEMPFILE) writes the
 # screenshot it grabs via grim. When Upwork runs in XWayland mode it takes
@@ -125,7 +125,7 @@ class WaybarReporter:
         self.update = asyncio.Event()
 
     def screenshot_taken(self):
-        self.last_shot = dt.datetime.utcnow()
+        self.last_shot = dt.datetime.now(dt.UTC)
         self.update.set()
         # XXX this is a temporary workaround,
         # because Upwork's native notification steals focus in Sway
@@ -141,7 +141,7 @@ class WaybarReporter:
         ])
 
     def idle_taken(self):
-        self.last_idle = dt.datetime.utcnow()
+        self.last_idle = dt.datetime.now(dt.UTC)
         self.update.set()
 
     async def report_waybar(self):
@@ -159,15 +159,13 @@ class WaybarReporter:
                 try:
                     last_shot = dt.datetime.fromtimestamp(
                         SHIM_SHOT.stat().st_mtime,
-                    ).astimezone().astimezone(dt.timezone.utc).replace(
-                        tzinfo=None,
-                    )
+                    ).astimezone().astimezone(dt.UTC)
                 except OSError:
                     pass
 
-            now = dt.datetime.utcnow()
+            now = dt.datetime.now(dt.UTC)
             current_interval = dt.datetime.fromtimestamp(
-                now.timestamp() // 600 * 600)
+                now.timestamp() // 600 * 600).astimezone(dt.UTC)
             next_interval = current_interval + interval
             prev_interval = current_interval - interval
             since_last = now - last_shot
