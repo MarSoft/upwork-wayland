@@ -44,7 +44,8 @@ extern GdkPixbuf* gdk_pixbuf_get_from_window(void *window, gint src_x, gint src_
     GError *err = NULL;
     GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file_at_scale(TEMPFILE, width-src_x, height-src_y, FALSE, &err);
     // clean up grabage
-    unlink(TEMPFILE);
+    //unlink(TEMPFILE);
+    // For now we do not clean it up since our py part takes timestamp from it
     if(err || !pixbuf) {
         printf("pixbuf failure: %s\n", err->message);
         g_error_free(err);

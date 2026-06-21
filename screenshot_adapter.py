@@ -14,6 +14,7 @@
 import asyncio
 import datetime as dt
 import json
+from pathlib import Path
 import subprocess
 import sys
 
@@ -98,6 +99,12 @@ class IdleTime(ServiceInterface):
 
 DUMMY = dt.datetime(2000, 1, 1)
 
+# Where the LD_PRELOAD shim (gdk/gdk-screenshotter.c, TEMPFILE) writes the
+# screenshot it grabs via grim. When Upwork runs in XWayland mode it takes
+# screenshots through the native gdk path rather than the GnomeShell DBus
+# method, so this file's mtime is the only signal of "last screenshot taken".
+SHIM_SHOT = Path('/tmp/upwork.png')
+
 class WaybarReporter:
     def __init__(self):
         self.last_shot = DUMMY
@@ -131,12 +138,26 @@ class WaybarReporter:
         hour = minute * 60
 
         while True:
+            # Prefer the in-process value set via the GnomeShell DBus path;
+            # fall back to the shim's screenshot file mtime (XWayland mode, or
+            # after a restart when last_shot has reset to DUMMY).
+            last_shot = self.last_shot
+            if last_shot == DUMMY:
+                try:
+                    last_shot = dt.datetime.fromtimestamp(
+                        SHIM_SHOT.stat().st_mtime,
+                    ).astimezone().astimezone(dt.timezone.utc).replace(
+                        tzinfo=None,
+                    )
+                except OSError:
+                    pass
+
             now = dt.datetime.utcnow()
             current_interval = dt.datetime.fromtimestamp(
                 now.timestamp() // 600 * 600)
             next_interval = current_interval + interval
             prev_interval = current_interval - interval
-            since_last = now - self.last_shot
+            since_last = now - last_shot
             till_next = next_interval - now
 
             since_lastidle = now - self.last_idle
@@ -145,8 +166,8 @@ class WaybarReporter:
             idle_active = since_lastidle < minute
 
             # this interval has its screenshot taken already
-            this_taken = self.last_shot > current_interval
-            prev_taken = self.last_shot > prev_interval
+            this_taken = last_shot > current_interval
+            prev_taken = last_shot > prev_interval
 
             percentage = 100 - till_next.total_seconds() / 600 * 100
             if since_last > 24*hour:
@@ -158,8 +179,8 @@ class WaybarReporter:
             till_next_fmt = str(till_next // second * second)[-4:]
             cls = 'done' if this_taken else 'active' if idle_active else 'inactive'
 
-            if self.last_shot != DUMMY:
-                lastshot_local = self.last_shot.replace(
+            if last_shot != DUMMY:
+                lastshot_local = last_shot.replace(
                     tzinfo=dt.timezone.utc,
                 ).astimezone()
                 text = f'@{lastshot_local:%H:%M}  {since_last_fmt}'
