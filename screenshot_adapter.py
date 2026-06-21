@@ -158,14 +158,13 @@ class WaybarReporter:
             if last_shot == DUMMY:
                 try:
                     last_shot = dt.datetime.fromtimestamp(
-                        SHIM_SHOT.stat().st_mtime,
-                    ).astimezone().astimezone(dt.UTC)
+                        SHIM_SHOT.stat().st_mtime, dt.UTC)
                 except OSError:
                     pass
 
             now = dt.datetime.now(dt.UTC)
             current_interval = dt.datetime.fromtimestamp(
-                now.timestamp() // 600 * 600).astimezone(dt.UTC)
+                now.timestamp() // 600 * 600, dt.UTC)
             next_interval = current_interval + interval
             prev_interval = current_interval - interval
             since_last = now - last_shot
@@ -191,9 +190,7 @@ class WaybarReporter:
             cls = 'done' if this_taken else 'active' if idle_active else 'inactive'
 
             if last_shot != DUMMY:
-                lastshot_local = last_shot.replace(
-                    tzinfo=dt.timezone.utc,
-                ).astimezone()
+                lastshot_local = last_shot.astimezone()
                 text = f'@{lastshot_local:%H:%M}  {since_last_fmt}'
             else:
                 text = f'@__:__  {since_last_fmt}'
