@@ -170,14 +170,29 @@ class WaybarReporter:
             since_last = now - last_shot
             till_next = next_interval - now
 
-            since_lastidle = now - self.last_idle
-            # When active, it will query idletime at least every minute.
-            # So if they didn't query it for a minute then they are inactive.
-            idle_active = since_lastidle < minute
-
             # this interval has its screenshot taken already
             this_taken = last_shot > current_interval
+            # a screenshot landed in the previous (or current) interval. Upwork
+            # takes EXACTLY ONE shot per clock-aligned 10-min interval, at an
+            # unpredictable moment within it -- so consecutive shots can be up to
+            # ~20 min apart. prev_taken aligns with that structure (unlike a flat
+            # time window, which would wrongly read "inactive" across a long gap).
             prev_taken = last_shot > prev_interval
+
+            # Best-effort "is Upwork tracking enabled right now?" -- a positive
+            # reminder so you notice if you forgot to start tracking (the Upwork
+            # window often sits hidden on a rear workspace). We can only infer it
+            # from the two tracking-only signals Upwork gives us:
+            #   - it polls GetIdletime (~every 60s) WHILE IDLE (it skips polling
+            #     when raw input is flowing, since it already knows you're active);
+            #   - it takes a screenshot, exactly one per 10-min interval.
+            # Either means tracking is (most likely) on. Blind spot: active +
+            # tracking, in a fresh interval before its shot lands, may briefly read
+            # "inactive" until the shot or an idle poll arrives. Better than nothing.
+            since_lastidle = now - self.last_idle
+            # +5s margin so we don't blip "off" for a moment right at the ~60s
+            # poll boundary (the loop re-evaluates every second).
+            tracking_on = since_lastidle < minute + 5*second or prev_taken
 
             percentage = 100 - till_next.total_seconds() / 600 * 100
             if since_last > 24*hour:
@@ -187,14 +202,14 @@ class WaybarReporter:
                 if since_last_fmt.startswith('0:'):
                     since_last_fmt = since_last_fmt[2:]
             till_next_fmt = str(till_next // second * second)[-4:]
-            cls = 'done' if this_taken else 'active' if idle_active else 'inactive'
+            cls = 'done' if this_taken else 'active' if tracking_on else 'inactive'
 
             if last_shot != DUMMY:
                 lastshot_local = last_shot.astimezone()
                 text = f'@{lastshot_local:%H:%M}  {since_last_fmt}'
             else:
                 text = f'@__:__  {since_last_fmt}'
-            if idle_active:
+            if tracking_on:
                 text += f'  x{till_next_fmt}'
             #if not this_taken:
             #    text += f'  {round(percentage, 1)}%'
@@ -208,7 +223,7 @@ class WaybarReporter:
                 'tooltip': f'{cls}',
                 # Noctalia-specific addons (harmless for waybar)
                 'icon': 'check' if this_taken else 'eye',
-                'color': 'secondary' if this_taken else 'primary' if idle_active else 'tertiary',
+                'color': 'secondary' if this_taken else 'primary' if tracking_on else 'tertiary',
             }), flush=True)
 
             # Sleep for one second, but wake up early if update event happens
